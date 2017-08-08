@@ -9,7 +9,7 @@ import (
 func main() {
 	initFlags()
 	mapResponses()
-	log.Println("Starting http server")
 
+	log.Println("Starting http server")
 	http.ListenAndServe(fmt.Sprintf(":%v", port), nil)
 }

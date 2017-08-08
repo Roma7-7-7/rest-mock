@@ -10,12 +10,38 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-type responseItem struct {
-	Path string `yaml:"path"`
-	File string `yaml:"file"`
+type header struct {
+	Key   string `yaml:"key"`
+	Value string `yaml:"value"`
 }
 
-func mapFile(path string, item responseItem) {
+type responseItem struct {
+	Path    string   `yaml:"path"`
+	File    string   `yaml:"file"`
+	Status  int      `yaml:"status"`
+	Headers []header `yaml:"headers"`
+}
+
+func mapStatus(w http.ResponseWriter, item responseItem) {
+	if item.Status == 0 {
+		return
+	}
+
+	w.WriteHeader(item.Status)
+}
+
+func mapHeaders(w http.ResponseWriter, item responseItem) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	for _, header := range item.Headers {
+		w.Header().Set(header.Key, header.Value)
+	}
+}
+
+func mapFile(w http.ResponseWriter, path string, item responseItem) {
+	if len(item.File) == 0 {
+		return
+	}
+
 	responseFilePath := filepath.Join(path, item.File)
 
 	if _, err := os.Stat(responseFilePath); os.IsNotExist(err) {
@@ -23,19 +49,15 @@ func mapFile(path string, item responseItem) {
 		return
 	}
 
-	var h = func(w http.ResponseWriter, r *http.Request) {
-		data, err := ioutil.ReadFile(responseFilePath)
+	data, err := ioutil.ReadFile(responseFilePath)
 
-		if err != nil {
-			log.Printf("Failed to read file [%v]\n%v\n", responseFilePath, err)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-
-		w.Write(data)
+	if err != nil {
+		log.Printf("Failed to read file [%v]\n%v\n", responseFilePath, err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
 
-	http.HandleFunc(item.Path, h)
+	w.Write(data)
 }
 
 func mapResponse(path string) {
@@ -55,9 +77,13 @@ func mapResponse(path string) {
 		return
 	}
 
-	if len(item.File) > 0 {
-		mapFile(path, item)
+	var h = func(w http.ResponseWriter, r *http.Request) {
+		mapHeaders(w, item)
+		mapStatus(w, item)
+		mapFile(w, path, item)
 	}
+
+	http.HandleFunc(item.Path, h)
 }
 
 func mapResponses() {
