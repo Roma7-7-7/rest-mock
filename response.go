@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v2"
 )
@@ -15,11 +16,46 @@ type header struct {
 	Value string `yaml:"value"`
 }
 
+type expects struct {
+	Headers []header `yaml:"headers"`
+}
+
 type responseItem struct {
 	Path    string   `yaml:"path"`
+	Expects expects  `yaml:"expects"`
 	File    string   `yaml:"file"`
 	Status  int      `yaml:"status"`
 	Headers []header `yaml:"headers"`
+}
+
+func toLowercase(keys map[string][]string) map[string][]string {
+	result := make(map[string][]string)
+
+	for k, v := range keys {
+		result[strings.ToLower(k)] = v
+	}
+
+	return result
+}
+
+func checkHeaders(r *http.Request, item responseItem) bool {
+	headers := toLowercase(r.Header)
+
+	for _, h := range item.Expects.Headers {
+		keys, ok := headers[strings.ToLower(h.Key)]
+
+		if !ok || len(keys) != 1 {
+			log.Printf("Request do not contain expected header [%v] or more than one value for that key", h.Key)
+			return false
+		}
+		//TODO: add support values
+		if keys[0] != h.Value {
+			log.Printf("Request do not contain expected header [%v]:[%v]", h.Key, h.Value)
+			return false
+		}
+	}
+
+	return true
 }
 
 func mapStatus(w http.ResponseWriter, item responseItem) {
@@ -78,6 +114,11 @@ func mapResponse(path string) {
 	}
 
 	var h = func(w http.ResponseWriter, r *http.Request) {
+		if !checkHeaders(r, item) {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
 		mapHeaders(w, item)
 		mapStatus(w, item)
 		mapFile(w, path, item)
