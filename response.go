@@ -8,25 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gopkg.in/yaml.v2"
+	"app/api"
+	"app/shared"
+	"app/storage"
 )
-
-type header struct {
-	Key   string `yaml:"key"`
-	Value string `yaml:"value"`
-}
-
-type expects struct {
-	Headers []header `yaml:"headers"`
-}
-
-type responseItem struct {
-	Path    string   `yaml:"path"`
-	Expects expects  `yaml:"expects"`
-	File    string   `yaml:"file"`
-	Status  int      `yaml:"status"`
-	Headers []header `yaml:"headers"`
-}
 
 func toLowercase(keys map[string][]string) map[string][]string {
 	result := make(map[string][]string)
@@ -38,10 +23,10 @@ func toLowercase(keys map[string][]string) map[string][]string {
 	return result
 }
 
-func checkHeaders(r *http.Request, item responseItem) bool {
+func checkHeaders(r *http.Request, e api.Endpoint) bool {
 	headers := toLowercase(r.Header)
 
-	for _, h := range item.Expects.Headers {
+	for _, h := range e.Expects.Headers {
 		keys, ok := headers[strings.ToLower(h.Key)]
 
 		if !ok || len(keys) != 1 {
@@ -58,27 +43,28 @@ func checkHeaders(r *http.Request, item responseItem) bool {
 	return true
 }
 
-func mapStatus(w http.ResponseWriter, item responseItem) {
-	if item.Status == 0 {
+func mapStatus(w http.ResponseWriter, e api.Endpoint) {
+	if e.Response.Status == 0 {
 		return
 	}
 
-	w.WriteHeader(item.Status)
+	w.WriteHeader(e.Response.Status)
 }
 
-func mapHeaders(w http.ResponseWriter, item responseItem) {
+func mapHeaders(w http.ResponseWriter, endpoint api.Endpoint) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	for _, header := range item.Headers {
+	for _, header := range endpoint.Response.Headers {
 		w.Header().Set(header.Key, header.Value)
 	}
 }
 
-func mapFile(w http.ResponseWriter, path string, item responseItem) {
-	if len(item.File) == 0 {
+func mapFile(w http.ResponseWriter, e api.Endpoint) {
+	if len(e.Response.ResponseFilePath) == 0 {
+		w.Write(e.Response.Data)
 		return
 	}
 
-	responseFilePath := filepath.Join(path, item.File)
+	responseFilePath := filepath.Join(shared.ResponseFolder, e.Name, e.Response.ResponseFilePath)
 
 	if _, err := os.Stat(responseFilePath); os.IsNotExist(err) {
 		log.Printf("Failed to find response file [%v]", responseFilePath)
@@ -96,55 +82,39 @@ func mapFile(w http.ResponseWriter, path string, item responseItem) {
 	w.Write(data)
 }
 
-func mapResponse(path string) {
-	apiFile := filepath.Join(path, "api.yml")
-	data, err := ioutil.ReadFile(apiFile)
-	item := responseItem{}
-
-	if err != nil {
-		log.Printf("Failed to read file [%v]\n%v\n", apiFile, err)
-		return
-	}
-
-	err = yaml.Unmarshal(data, &item)
-
-	if err != nil {
-		log.Printf("Failed to read file [%v]\n%v\n", apiFile, err)
-		return
-	}
-
+func mapResponse(e api.Endpoint) {
 	var h = func(w http.ResponseWriter, r *http.Request) {
-		if !checkHeaders(r, item) {
+		if !checkHeaders(r, e) {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
 
-		mapHeaders(w, item)
-		mapStatus(w, item)
-		mapFile(w, path, item)
+		mapHeaders(w, e)
+		mapStatus(w, e)
+		mapFile(w, e)
 	}
 
-	http.HandleFunc(item.Path, h)
+	http.HandleFunc(e.Path, h)
 }
 
 func mapResponses() {
 	log.Println("Mapping request to responses")
 
-	files, err := ioutil.ReadDir(responseFolder)
+	_, err := ioutil.ReadDir(shared.ResponseFolder)
 
 	if err != nil {
 		log.Println(err)
-		log.Fatalf("Failed to locate responses directory [%v]", responseFolder)
+		log.Fatalf("Failed to locate responses directory [%v]", shared.ResponseFolder)
 	}
 
-	for _, f := range files {
-		fullPath := filepath.Join(responseFolder, f.Name())
+	endpoints, err := storage.Storage.GetAll()
 
-		if !f.IsDir() {
-			log.Printf("[%v] is not a directory\n", f.Name())
-			continue
-		}
+	if err != nil {
+		log.Println(err)
+		log.Fatal("Failed to load endpoints")
+	}
 
-		mapResponse(fullPath)
+	for _, e := range endpoints {
+		mapResponse(e)
 	}
 }
