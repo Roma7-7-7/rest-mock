@@ -14,6 +14,8 @@
 .glide/
 
 debug
+.vscode/
 restmock
 rest-mock
 responses/
+rest-mock.db

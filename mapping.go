@@ -23,11 +23,10 @@ type ResponseData struct {
 
 //RequestMapping :
 type RequestMapping struct {
-	Method   string
-	Path     string
-	Headers  map[string][]string
-	Params   map[string][]string
-	Response ResponseData
+	Method  string
+	Path    string
+	Headers map[string][]string
+	Params  map[string][]string
 }
 
 func toLowerHeaders(r *http.Request) map[string][]string {
@@ -102,106 +101,89 @@ func (m RequestMapping) matchesMapping(other RequestMapping) bool {
 
 //Mapper :
 type Mapper interface {
-	Add(m RequestMapping) error
-	Get(r *http.Request) (*ResponseData, error)
-}
-
-//DictMapper :
-type DictMapper struct {
-	mappings map[string][]RequestMapping
-}
-
-//Add :
-func (d DictMapper) Add(m RequestMapping) error {
-	lowerPath := strings.ToLower(m.Path)
-	if mappings, ok := d.mappings[lowerPath]; !ok {
-		d.mappings[lowerPath] = []RequestMapping{m}
-	} else {
-		for _, existed := range mappings {
-			if m.matchesMapping(existed) {
-				return errors.New("Mapping already exist in mapper")
-			}
-		}
-
-		d.mappings[lowerPath] = append(d.mappings[lowerPath], m)
-	}
-	return nil
-}
-
-//Get :
-func (d DictMapper) Get(r *http.Request) (*ResponseData, error) {
-	if mappings, ok := d.mappings[strings.ToLower(r.URL.Path)]; ok {
-		for _, mapping := range mappings {
-			if mapping.matchesRequest(r) {
-				return &mapping.Response, nil
-			}
-		}
-	}
-
-	return nil, errors.New("Endpoint not found")
+	Add(m RequestMapping, d ResponseData) error
+	GetByRequest(r *http.Request) (ResponseData, error)
 }
 
 //DefaultMapper :
 var DefaultMapper Mapper
 
+type boltDbMapping struct {
+	ID      int
+	Request RequestMapping
+}
+
+type pathMapping map[string][]boltDbMapping
+
+//BoltDBMapper :
+type BoltDBMapper struct {
+	mappings pathMapping
+}
+
+//Add :
+func (mapper BoltDBMapper) Add(m RequestMapping, r ResponseData) error {
+	// if mapper.Get(m) != nil
+	lowerPath := strings.ToLower(m.Path)
+	if _, ok := mapper.mappings[lowerPath]; !ok {
+		mapper.mappings[lowerPath] = make([]boltDbMapping, 0)
+	}
+
+	for _, existed := range mapper.mappings[lowerPath] {
+		if m.matchesMapping(existed.Request) {
+			return errors.New("Mapping already exist in mapper")
+		}
+	}
+
+	if id, err := AddResponseData(r); err == nil {
+		mapper.mappings[lowerPath] = append(mapper.mappings[lowerPath], boltDbMapping{
+			ID:      id,
+			Request: m,
+		})
+	} else {
+		return err
+	}
+
+	return nil
+}
+
+//GetByRequest :
+func (mapper BoltDBMapper) GetByRequest(r *http.Request) (ResponseData, error) {
+	if mappings, ok := mapper.mappings[strings.ToLower(r.URL.Path)]; ok {
+		for _, mapping := range mappings {
+			if !mapping.Request.matchesRequest(r) {
+				continue
+			}
+
+			return GetResponseData(mapping.ID)
+		}
+	}
+
+	return ResponseData{}, errors.New("Endpoint not found")
+}
+
 //MappingHandler :
 func MappingHandler(w http.ResponseWriter, r *http.Request) {
-	if rd, err := DefaultMapper.Get(r); rd == nil || err != nil {
+	if rd, err := DefaultMapper.GetByRequest(r); err != nil {
 		log.Printf("Failed to find request mapping for endpoint [%v]\n", r.URL)
 		w.WriteHeader(http.StatusNotFound)
 	} else {
-		mapStatus(w, rd)
-		mapHeaders(w, rd)
+		if rd.Status != 0 {
+			w.WriteHeader(rd.Status)
+		}
+
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		for key, vavlues := range rd.Headers {
+			for _, value := range vavlues {
+				w.Header().Set(key, value)
+			}
+		}
+
 		w.Write(rd.Data)
 	}
 }
 
-func mapStatus(w http.ResponseWriter, r *ResponseData) {
-	if r.Status == 0 {
-		return
-	}
-
-	w.WriteHeader(r.Status)
-}
-
-func mapHeaders(w http.ResponseWriter, r *ResponseData) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	for key, vavlues := range r.Headers {
-		for _, value := range vavlues {
-			w.Header().Set(key, value)
-		}
-	}
-}
-
 func init() {
-	DefaultMapper = DictMapper{
-		mappings: make(map[string][]RequestMapping, 0),
+	DefaultMapper = BoltDBMapper{
+		mappings: make(pathMapping, 0),
 	}
-
-	DefaultMapper.Add(RequestMapping{
-		Method:  "GET",
-		Path:    "/",
-		Headers: make(map[string][]string),
-		Params:  make(map[string][]string),
-		Response: ResponseData{
-			Status:  201,
-			Headers: make(map[string][]string),
-			Data:    []byte("Success"),
-		},
-	})
-
-	headers1 := make(map[string][]string)
-	headers1["Content-Type"] = []string{"application/json"}
-
-	DefaultMapper.Add(RequestMapping{
-		Method:  "POST",
-		Path:    "/test2",
-		Headers: headers1,
-		Params:  make(map[string][]string),
-		Response: ResponseData{
-			Status:  201,
-			Headers: make(map[string][]string),
-			Data:    []byte("Success 2"),
-		},
-	})
 }

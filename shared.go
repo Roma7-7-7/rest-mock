@@ -1,5 +1,15 @@
 package main
 
+//SupportedMethods :
+var SupportedMethods = []string{
+	"GET",
+	"POST",
+	"PUT",
+	"PATCH",
+	"HEAD",
+	"DELETE",
+}
+
 //Header :
 type Header struct {
 	Key   string `yaml:"key"`
