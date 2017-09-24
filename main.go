@@ -6,6 +6,9 @@ import (
 	"net/http"
 )
 
+//VERSION :
+const VERSION = "0.1"
+
 func main() {
 	if AddMapping {
 		AddRequestMapping()

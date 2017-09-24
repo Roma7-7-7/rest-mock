@@ -18,4 +18,4 @@ debug
 restmock
 rest-mock
 responses/
-rest-mock.db
+rest-mock*.db

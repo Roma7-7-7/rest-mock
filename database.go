@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/gob"
+	"fmt"
 	"log"
 	"time"
 
@@ -16,17 +17,19 @@ var DB *bolt.DB
 var mappingsBucket = []byte("mappings")
 
 //AddResponseData :
-func AddResponseData(response ResponseData) (int, error) {
+func AddResponseData(item BoltDbItem) (int, error) {
+	log.Println("Adding new item")
 	var result int
-	data, e := serialize(&response)
+	data, err := serialize(&item)
 
-	if e != nil {
-		return result, e
+	if err != nil {
+		return result, err
 	}
 
-	err := DB.Update(func(tx *bolt.Tx) error {
+	err = DB.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(mappingsBucket)
 		sequance, err := put(b, data)
+		log.Printf("Added data with sequence %v\n", sequance)
 
 		if err == nil {
 			result = int(sequance)
@@ -37,14 +40,43 @@ func AddResponseData(response ResponseData) (int, error) {
 	return result, err
 }
 
-//GetResponseData :
-func GetResponseData(id int) (ResponseData, error) {
-	result := ResponseData{}
+//GetBoltDbItem :
+func GetBoltDbItem(id int) (*BoltDbItem, error) {
+	log.Printf("Getting data with id %v\n", id)
+	result := BoltDbItem{}
 
 	err := DB.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(mappingsBucket)
 		data := b.Get(itob(id))
+
+		if data == nil {
+			return fmt.Errorf("BoltDbItem with id %v not found", id)
+		}
 		return deserialize(data, &result)
+	})
+
+	return &result, err
+}
+
+//GetAll :
+func GetAll() (map[int]*BoltDbItem, error) {
+	log.Println("Getting all endpoints from DB")
+	result := make(map[int]*BoltDbItem, 0)
+
+	err := DB.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(mappingsBucket)
+		c := b.Cursor()
+
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			item := BoltDbItem{}
+			if err := deserialize(v, &item); err != nil {
+				return err
+			}
+
+			result[int(binary.BigEndian.Uint64(k))] = &item
+		}
+
+		return nil
 	})
 
 	return result, err
@@ -57,23 +89,23 @@ func put(b *bolt.Bucket, data []byte) (int, error) {
 		return 0, err
 	}
 
-	s := int(sequence)
-	return s, b.Put(itob(s), data)
+	key := int(sequence)
+	return key, b.Put(itob(key), data)
 }
 
-func serialize(r *ResponseData) ([]byte, error) {
+func serialize(item *BoltDbItem) ([]byte, error) {
 	b := bytes.Buffer{}
 	e := gob.NewEncoder(&b)
 
-	err := e.Encode(r)
+	err := e.Encode(item)
 	return b.Bytes(), err
 }
 
-func deserialize(data []byte, response *ResponseData) error {
+func deserialize(data []byte, item *BoltDbItem) error {
 	b := bytes.Buffer{}
 	b.Write(data)
 	d := gob.NewDecoder(&b)
-	return d.Decode(response)
+	return d.Decode(item)
 }
 
 func itob(v int) []byte {
@@ -83,23 +115,23 @@ func itob(v int) []byte {
 }
 
 func init() {
-	if db, err := bolt.Open("rest-mock.db", 0600, &bolt.Options{
+	if db, err := bolt.Open(fmt.Sprintf("rest-mock:%v.db", VERSION), 0600, &bolt.Options{
 		Timeout: 1 * time.Second,
 	}); err == nil {
 		DB = db
 	} else {
-		log.Fatalf("Failed to open connection to db\n%v", err)
+		log.Fatalf("Failed to open connection to db\n%v\n", err)
 	}
 
 	err := DB.Update(func(tx *bolt.Tx) error {
 		if _, err := tx.CreateBucketIfNotExists(mappingsBucket); err != nil {
-			log.Fatalf("Failed to create mappings bucket\n%v", err)
+			log.Fatalf("Failed to create mappings bucket\n%v\n", err)
 		}
 
 		return nil
 	})
 
 	if err != nil {
-		log.Fatalf("Failed to create mappings bucket\n%v", err)
+		log.Fatalf("Failed to create mappings bucket\n%v\n", err)
 	}
 }

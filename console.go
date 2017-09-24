@@ -45,19 +45,29 @@ func AddRequestMapping() {
 		fmt.Printf("Selected method: %v\n", method)
 		path := readPath()
 		fmt.Printf("Selected path: %v\n", path)
-		headers := getHeaders()
-		fmt.Println(headers)
+		headers := getHeaders("request")
+		fmt.Printf("Selected headers: %v\n", headers)
+		status := getResponseStatus()
+		fmt.Printf("Selected status: %v\n", status)
+		responseHeaders := getHeaders("response")
+		fmt.Printf("Selected headers: %v\n", headers)
+		data := getResponseData()
+		fmt.Printf("Response data: \n%v\n", data)
 
-		result := RequestMapping{
+		mapping := RequestMapping{
 			Method:  method,
 			Path:    path,
 			Headers: headers,
 			Params:  make(map[string][]string),
 		}
+		response := ResponseData{
+			Status:  status,
+			Headers: responseHeaders,
+			Data:    []byte(data),
+		}
 
-		if err := DefaultMapper.Add(result, ResponseData{Status: 201, Data: []byte("Boltdb")}); err != nil {
-			log.Println(err)
-			log.Println("Failed to add request mapping")
+		if err := DefaultMapper.Add(mapping, response); err != nil {
+			log.Printf("Failed to add request mapping\n%v\n", err)
 		}
 
 		if !CheckTrue("Do you want to add additional mapping?") {
@@ -102,11 +112,11 @@ func readPath() string {
 	}
 }
 
-func getHeaders() map[string][]string {
+func getHeaders(key string) map[string][]string {
 	result := make(map[string][]string)
 
 	for {
-		if !CheckTrue("Do you want to add header?") {
+		if !CheckTrue(fmt.Sprintf("Do you want to add %v header?", key)) {
 			if len(result) == 0 {
 				fmt.Println("Skip headers")
 			}
@@ -125,6 +135,29 @@ func getHeaders() map[string][]string {
 			} else {
 				result[lowerKey] = []string{value}
 			}
+		}
+	}
+}
+
+func getResponseStatus() int {
+	for {
+		fmt.Println("Enter response status")
+
+		line := readString()
+		if result, err := strconv.ParseUint(line, 10, 32); err != nil {
+			log.Printf("Failed to patse value %v. Please try again\n", line)
+			continue
+		} else {
+			return int(result)
+		}
+	}
+}
+
+func getResponseData() string {
+	fmt.Println("Please enter response data")
+	for {
+		if text := readString(); CheckTrue("Is it final response text?") {
+			return text
 		}
 	}
 }
